@@ -10,7 +10,7 @@ command_map = {
 setup(
     name="pixeloe",
     packages=find_packages(),
-    version="1.0.1",
+    version="1.0.2",
     url="https://github.com/KohakuBlueleaf/PixelOE",
     description="Detail-Oriented Pixelization based on Contrast-Aware Outline Expansion.",
     license="Apache License 2.0",
@@ -24,5 +24,5 @@ setup(
             for command, func in command_map.items()
         ]
     },
-    python_requires=">=3.10",
+    python_requires=">=3.9",
 )
