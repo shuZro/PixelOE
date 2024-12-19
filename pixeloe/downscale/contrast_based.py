@@ -25,33 +25,45 @@ def find_pixel(chunks):
 
 
 def contrast_based_downscale(
-    img,
-    target_size=128,
+        img,
+        target_size=128,
 ):
-    H, W, _ = img.shape
+    # Separate color channels (BGR) and alpha channel
+    color = img[:, :, :3]  # Extract BGR
+    alpha = img[:, :, 3]  # Extract alpha channel
 
+    H, W, _ = color.shape
     ratio = W / H
-    target_size = (target_size**2 / ratio) ** 0.5
+    target_size = (target_size ** 2 / ratio) ** 0.5
     target_hw = (int(target_size * ratio), int(target_size))
     patch_size = max(int(round(H // target_hw[1])), int(round(W // target_hw[0])))
 
-    img_lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB).astype(np.float32)
-    img_lab[:, :, 0] = apply_chunk_torch(
-        img_lab[:, :, 0], patch_size, patch_size, find_pixel
+    color_lab = cv2.cvtColor(color, cv2.COLOR_BGR2LAB).astype(np.float32)
+    color_lab[:, :, 0] = apply_chunk_torch(
+        color_lab[:, :, 0], patch_size, patch_size, find_pixel
     )
-    img_lab[:, :, 1] = apply_chunk_torch(
-        img_lab[:, :, 1],
+    color_lab[:, :, 1] = apply_chunk_torch(
+        color_lab[:, :, 1],
         patch_size,
         patch_size,
         lambda x: torch.median(x, dim=1, keepdims=True).values,
     )
-    img_lab[:, :, 2] = apply_chunk_torch(
-        img_lab[:, :, 2],
+    color_lab[:, :, 2] = apply_chunk_torch(
+        color_lab[:, :, 2],
         patch_size,
         patch_size,
         lambda x: torch.median(x, dim=1, keepdims=True).values,
     )
-    img = cv2.cvtColor(img_lab.clip(0, 255).astype(np.uint8), cv2.COLOR_LAB2BGR)
+    color = cv2.cvtColor(color_lab.clip(0, 255).astype(np.uint8), cv2.COLOR_LAB2BGR)
 
-    img_sm = cv2.resize(img, target_hw, interpolation=cv2.INTER_NEAREST)
-    return img_sm
+    # Downscale the color channels
+    color_sm = cv2.resize(color, target_hw, interpolation=cv2.INTER_NEAREST)
+
+    # Downscale the alpha channel (if desired) to match the color channels
+    alpha_sm = cv2.resize(alpha, target_hw, interpolation=cv2.INTER_NEAREST)
+
+    # Combine the processed color channels and the alpha channel
+    output = cv2.merge((color_sm, alpha_sm))
+
+    return output
+

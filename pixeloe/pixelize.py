@@ -1,7 +1,9 @@
 from time import time
 
 import cv2
+import numpy
 import numpy as np
+from PIL import Image
 
 from .color import match_color, color_styling, color_quant
 from .downscale import downscale_mode
@@ -10,21 +12,22 @@ from .utils import isiterable
 
 
 def pixelize(
-    img,
-    mode="contrast",
-    target_size=128,
-    patch_size=16,
-    pixel_size=None,
-    thickness=2,
-    color_matching=True,
-    contrast=1.0,
-    saturation=1.0,
-    colors=None,
-    color_quant_method="kmeans",
-    colors_with_weight=False,
-    no_upscale=False,
-    no_downscale=False,
+        img: Image,
+        mode="contrast",
+        target_size=128,
+        patch_size=16,
+        pixel_size=None,
+        thickness=2,
+        color_matching=True,
+        contrast=1.0,
+        saturation=1.0,
+        colors=None,
+        color_quant_method="kmeans",
+        colors_with_weight=False,
+        no_upscale=False,
+        no_downscale=False,
 ):
+    img = cv2.cvtColor(numpy.array(img), cv2.COLOR_RGBA2BGRA)
     H, W, _ = img.shape
     if pixel_size is None:
         pixel_size = patch_size
@@ -34,11 +37,11 @@ def pixelize(
         target_org_hw = tuple([int(i * patch_size) for i in target_size][:2])
         ratio = target_org_hw[0] / target_org_hw[1]
         target_org_size = target_org_hw[1]
-        target_size = ((target_org_size**2) / (patch_size**2) * ratio) ** 0.5
+        target_size = ((target_org_size ** 2) / (patch_size ** 2) * ratio) ** 0.5
     else:
         if isiterable(target_size):
             target_size = target_size[0]
-        target_org_size = (target_size**2 * patch_size**2 / ratio) ** 0.5
+        target_org_size = (target_size ** 2 * patch_size ** 2 / ratio) ** 0.5
         target_org_hw = (int(target_org_size * ratio), int(target_org_size))
 
     img = cv2.resize(img, target_org_hw)
@@ -70,7 +73,7 @@ def pixelize(
             )
             # TODO: How to get more reasonable weight?
             weight_gamma = target_size / 512
-            weight_mat = weight_mat**weight_gamma
+            weight_mat = weight_mat ** weight_gamma
         img_sm = color_quant(
             img_sm,
             colors,
@@ -87,11 +90,32 @@ def pixelize(
     if no_upscale:
         return img_sm
 
-    return cv2.resize(
+    img = cv2.resize(
         img_sm,
         (img_sm.shape[1] * pixel_size, img_sm.shape[0] * pixel_size),
         interpolation=cv2.INTER_NEAREST,
     )
+    image = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
+    image = Image.fromarray(image)
+    image = image.resize((target_size, target_size), Image.Resampling.NEAREST)
+    image = remove_non_fully_transparent_pixels(image)
+
+    return image
+
+
+def remove_non_fully_transparent_pixels(image):
+    image = image.convert('RGBA')
+    pixels = image.load()
+
+    for y in range(image.height):
+        for x in range(image.width):
+            r, g, b, a = pixels[x, y]
+            if a > 0 and a < 150:
+                pixels[x, y] = (r, g, b, 0)
+            if a > 150 and a < 255:
+                pixels[x, y] = (r, g, b, 255)
+
+    return image
 
 
 if __name__ == "__main__":
