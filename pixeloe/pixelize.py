@@ -13,7 +13,7 @@ from .utils import isiterable
 
 def pixelize(
         img: Image,
-        mode="contrast",
+        mode="nearest",
         target_size=128,
         patch_size=16,
         pixel_size=None,
