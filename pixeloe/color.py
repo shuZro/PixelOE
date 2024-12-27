@@ -3,9 +3,9 @@ import numpy as np
 from PIL import Image
 
 
-def match_color(source, target, level=5):
+def match_color(source, target, level=5, quant_colors=32):
     source_color = source[:, :, :3]  # Extract BGR
-    alpha = source[:, :, 3]  # Extract alpha channel (unchanged)
+    alpha = source[:, :, 3]  # Extract alpha channel
     target_color = target[:, :, :3]
 
     # Convert BGR to L*a*b* and match std/mean
@@ -18,7 +18,6 @@ def match_color(source, target, level=5):
     )
 
     matched_color = matched_color.astype(np.float32)
-    # Use wavelet colorfix method to match original low-frequency data
     matched_color[:, :, 0] = wavelet_colorfix(
         matched_color[:, :, 0], target_color[:, :, 0], level=level
     )
@@ -30,17 +29,22 @@ def match_color(source, target, level=5):
     )
     matched_color = matched_color.clip(0, 255).astype(np.uint8)
 
-    # Combine matched color channels with the original alpha channel
+    # Combine matched color with alpha channel
     output = cv2.merge((matched_color, alpha))
 
+    # Enforce solid colors using quantization
+    output = color_quant(output, colors=quant_colors)
+
     return output
 
 
-def wavelet_colorfix(inp, target, level=5):
+
+
+def wavelet_colorfix(inp, target, level=3):  # Reduced levels for speed
     inp_high, _ = wavelet_decomposition(inp, level)
     _, target_low = wavelet_decomposition(target, level)
-    output = inp_high + target_low
-    return output
+    return inp_high + target_low
+
 
 
 def wavelet_decomposition(inp, levels):
@@ -69,8 +73,7 @@ def color_styling(inp, saturation=1.2, contrast=1.1):
     return output
 
 
-def color_quant(image, colors=32, weights=None, repeats=64, method="kmeans"):
-    # Handle RGBA images
+def color_quant(image, colors=32):
     has_alpha = image.shape[2] == 4
 
     # Separate RGB and alpha channels
@@ -80,60 +83,22 @@ def color_quant(image, colors=32, weights=None, repeats=64, method="kmeans"):
     else:
         rgb_image = image
 
-    match method:
-        case "kmeans":
-            if weights is not None:
-                h, w, c = rgb_image.shape
-                pixels = []
-                weights = weights / np.max(weights) * repeats
-                for i in range(h):
-                    for j in range(w):
-                        repeat_times = max(1, int(weights[i, j]))
-                        pixels.extend([rgb_image[i, j]] * repeat_times)
-                pixels = np.array(pixels, dtype=np.float32)
-                criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 32, 1)
-                _, labels, palette = cv2.kmeans(
-                    pixels, colors, None, criteria, 4, cv2.KMEANS_RANDOM_CENTERS
-                )
+    # Flatten RGB channels for k-means clustering
+    h, w, c = rgb_image.shape
+    pixels = rgb_image.reshape((-1, 3)).astype(np.float32)
 
-                quantized_rgb = np.zeros((h, w, c), dtype=np.uint8)
-                label_idx = 0
-                for i in range(h):
-                    for j in range(w):
-                        repeat_times = max(1, int(weights[i, j]))
-                        quantized_rgb[i, j] = palette[labels[label_idx]]
-                        label_idx += repeat_times
-            else:
-                h, w, c = rgb_image.shape
-                pixels = rgb_image.reshape((-1, 3)).astype(np.float32)
-                criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 32, 1)
-                _, labels, palette = cv2.kmeans(
-                    pixels, colors, None, criteria, 4, cv2.KMEANS_RANDOM_CENTERS
-                )
+    # Perform k-means clustering
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+    _, labels, palette = cv2.kmeans(
+        pixels, colors, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS
+    )
+    quantized_rgb = palette[labels.flatten()].reshape(h, w, 3).astype(np.uint8)
 
-                quantized_rgb = np.zeros((h, w, c), dtype=np.uint8)
-                for i in range(h):
-                    for j in range(w):
-                        quantized_rgb[i, j] = palette[labels[i * w + j]]
+    # Combine quantized RGB with alpha if present
+    if has_alpha:
+        quantized_image = cv2.merge((quantized_rgb, alpha_channel))
+    else:
+        quantized_image = quantized_rgb
 
-            # If the image has an alpha channel, combine it with the quantized RGB
-            if has_alpha:
-                quantized_image = cv2.merge((quantized_rgb, alpha_channel))
-            else:
-                quantized_image = quantized_rgb
+    return quantized_image
 
-            return quantized_image
-
-        case "maxcover":
-            img = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB)
-            img_pil = Image.fromarray(img)
-            img_quant = img_pil.quantize(colors, 1, kmeans=colors).convert("RGB")
-            quantized_rgb = cv2.cvtColor(np.array(img_quant), cv2.COLOR_RGB2BGR)
-
-            # If the image has an alpha channel, combine it with the quantized RGB
-            if has_alpha:
-                quantized_image = cv2.merge((quantized_rgb, alpha_channel))
-            else:
-                quantized_image = quantized_rgb
-
-            return quantized_image

@@ -16,21 +16,14 @@ def pixelize(
         mode="nearest",
         target_size=128,
         patch_size=16,
-        pixel_size=None,
         thickness=2,
         color_matching=True,
         contrast=1.0,
         saturation=1.0,
-        colors=None,
-        color_quant_method="kmeans",
-        colors_with_weight=False,
-        no_upscale=False,
-        no_downscale=False,
+        colors=16,
 ):
     img = cv2.cvtColor(numpy.array(img), cv2.COLOR_RGBA2BGRA)
     H, W, _ = img.shape
-    if pixel_size is None:
-        pixel_size = patch_size
 
     ratio = W / H
     if isiterable(target_size) and len(target_size) > 1:
@@ -49,55 +42,26 @@ def pixelize(
 
     if thickness:
         img, weight = outline_expansion(img, thickness, thickness, patch_size, 9, 4)
-    elif colors is not None and colors_with_weight:
-        weight = expansion_weight(img, patch_size, (patch_size // 4) * 2, 9, 4)[
-            ..., None
-        ]
-        weight = np.abs(weight * 2 - 1)
 
     if color_matching:
         img = match_color(img, org_img)
 
-    if no_downscale:
-        return img
     img_sm = downscale_mode[mode](img, target_size)
 
     if colors is not None:
         img_sm_orig = img_sm.copy()
-        weight_mat = None
-        if colors_with_weight:
-            weight_mat = cv2.resize(
-                weight,
-                (img_sm.shape[1], img_sm.shape[0]),
-                interpolation=cv2.INTER_LINEAR,
-            )
-            # TODO: How to get more reasonable weight?
-            weight_gamma = target_size / 512
-            weight_mat = weight_mat ** weight_gamma
+
         img_sm = color_quant(
             img_sm,
             colors,
-            weight_mat,
-            # TODO: How to get more reasonable repeat times?
-            int((patch_size * colors) ** 0.5),
-            color_quant_method,
         )
         img_sm = match_color(img_sm, img_sm_orig, 3)
 
     if contrast != 1 or saturation != 1:
         img_sm = color_styling(img_sm, saturation, contrast)
 
-    if no_upscale:
-        return img_sm
-
-    img = cv2.resize(
-        img_sm,
-        (img_sm.shape[1] * pixel_size, img_sm.shape[0] * pixel_size),
-        interpolation=cv2.INTER_NEAREST,
-    )
-    image = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
+    image = cv2.cvtColor(img_sm, cv2.COLOR_BGRA2RGBA)
     image = Image.fromarray(image)
-    image = image.resize((target_size, target_size), Image.Resampling.NEAREST)
     image = remove_non_fully_transparent_pixels(image)
 
     return image
